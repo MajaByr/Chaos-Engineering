@@ -9,8 +9,13 @@
 ## Baseline (pre-experiment)
 
 Prior to the experiment, all pods were ready and running.
+<img width="890" height="359" alt="image" src="https://github.com/user-attachments/assets/3b665321-f8f0-4154-adaf-83aad3fd1232" />
+
 
 The frontend pod (`frontend-759775d795-qfd6l`) was operating within normal parameters. CPU usage stood at 0.047 cores (47% of requested, 23.5% of limit), with CPU throttling at 28.1%. The load generator recorded 937 requests with a 0% failure rate, an average response time of 82 ms.
+<img width="945" height="410" alt="image" src="https://github.com/user-attachments/assets/5ca2b401-8875-4ce2-807f-a060423facc3" />
+<img width="945" height="250" alt="image" src="https://github.com/user-attachments/assets/8effda90-a6e9-4d72-8396-de5fb0321ccc" />
+
 
 ## Experiment Execution
 
@@ -33,6 +38,8 @@ spec:
 ```
 
 The following sequence was observed:
+<img width="945" height="99" alt="image" src="https://github.com/user-attachments/assets/fb37be10-47c2-4430-9f9c-b9773d812443" />
+
 
 | Time | Event |
 |---|---|
@@ -45,6 +52,9 @@ The following sequence was observed:
 **Mean Time To Recovery (MTTR):** 7m52s − 7m46s = **6 seconds**
 
 Recovery was exceptionally fast due to the container image being present in the local node cache, eliminating the image pull step entirely.
+In Grafana we can see that new pod was created almost immediately:
+<img width="865" height="500" alt="image" src="https://github.com/user-attachments/assets/cd949f80-84c1-4c9b-9c65-4cd1cc9db91b" />
+
 
 ## Load Generator Comparison
 
@@ -54,6 +64,9 @@ Recovery was exceptionally fast due to the container image being present in the 
 | Failures | 0 (0.00%) | 21 (0.64%) | spike |
 | Avg response time | 82 ms | 128 ms | +56% |
 | Max response time | 4670 ms | 19685 ms | +322% |
+
+<img width="945" height="254" alt="image" src="https://github.com/user-attachments/assets/a2fa0a9d-b91e-4ef7-9b82-01694e3a4e70" />
+
 
 ## Error Rate and Latency — Impact Observed
 
@@ -70,6 +83,9 @@ Importantly, the failures were limited to the disruption window only.
 
 ---
 
+
+
+
 # Experiment 2: Network Partition
 
 **Objective:** Simulate a network-level communication failure between the frontend and checkoutservice, and observe the system's partial degradation behavior and recovery.
@@ -81,6 +97,9 @@ Importantly, the failures were limited to the disruption window only.
 Prior to the experiment, all 14 monitored endpoints reported a 0% failure rate. The checkout endpoint (`POST /cart/checkout`) recorded an average response time of 139ms with no failures across 119 requests. Overall system throughput was stable at 1.80 req/s.
 
 Prior to conducting network partition experiments, liveness and readiness probe timeouts were increased from the default 1 second to 10 seconds across all application deployments. This adjustment was necessary to prevent probe-induced cascading failures in the single-node Kind environment, where iptables-based network rules affect all pod-to-pod traffic on the node. Without this change, health probes would begin failing within ~15 seconds of partition injection, triggering Kubernetes to kill and restart unrelated pods.
+
+<img width="1123" height="310" alt="image" src="https://github.com/user-attachments/assets/c5171c65-f721-4cb0-9d36-c78f95fd7360" />
+
 
 ## Experiment Execution
 
@@ -118,9 +137,14 @@ spec:
 | T+59s | Duration elapsed |
 | T+60s | Partition automatically removed, services recovered |
 
+<img width="1090" height="255" alt="image" src="https://github.com/user-attachments/assets/80e72532-9d07-4e29-8a87-9f40124c5285" />
+
 ## Impact Observed During Partition
 
 The network partition produced a clean, isolated failure confined exclusively to the `POST /cart/checkout` endpoint. All other 13 endpoints maintained a 0% failure rate throughout the experiment, confirming the expected partial degradation behavior.
+
+<img width="1091" height="303" alt="image" src="https://github.com/user-attachments/assets/24390221-1d1f-493d-839e-72a29619816e" />
+
 
 | Metric | Baseline | During Partition | Change |
 |---|---|---|---|
@@ -133,11 +157,14 @@ The network partition produced a clean, isolated failure confined exclusively to
 
 The maximum observed response time of 20,046ms corresponds to the frontend's HTTP timeout threshold — requests to checkoutservice were held open until the connection timed out, rather than failing immediately.
 
-No pod restarts occurred during the experiment.
+No pod restarts occurred during the experiment:
+<img width="872" height="403" alt="image" src="https://github.com/user-attachments/assets/0754fd51-1258-4ca9-af9d-b9d29439e29b" />
+
 
 ## Recovery
 
 Upon automatic removal of the partition at T+60s, the failure rate dropped to 0.00 failures/s immediately. The 8 failures recorded during the experiment represent the total blast radius — no additional failures were observed post-recovery.
+<img width="1114" height="305" alt="image" src="https://github.com/user-attachments/assets/6de4c845-74cf-442f-ae53-af880a0936e2" />
 
 ## Conclusions
 
