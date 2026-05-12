@@ -1,4 +1,4 @@
-# Experiment 1: Pod Failure (Pod Kill)
+<img width="1114" height="305" alt="image" src="https://github.com/user-attachments/assets/08172119-e88b-4075-a28e-25e00c055875" /># Experiment 1: Pod Failure (Pod Kill)
 
 **Objective:** Simulate an unexpected frontend pod crash and observe Kubernetes self-healing behavior, measuring the impact on request error rate and system recovery time.
 
@@ -82,6 +82,12 @@ Importantly, the failures were limited to the disruption window only.
 - The brief unavailability window caused a measurable but contained error spike (0.64% of total requests), with no persistent degradation after recovery.
 - The elevated average response time (128 ms vs 82 ms baseline) reflects request failures and retries during the disruption window rather than ongoing latency degradation.
 - The absence of image pull delay (cached image) was a key factor in achieving sub-10-second MTTR. In a cold-start scenario (no cached image), MTTR would take much longer.
+
+
+## Injection mechanism 
+
+Chaos Mesh implements pod kill by issuing a direct deletion request to the Kubernetes API server targeting the selected pod. The controller identifies the pod matching the label selector and calls the same API endpoint that kubectl delete pod would invoke. The container runtime (containerd) receives a SIGTERM signal and immediately stops the container. Kubernetes detects the pod as terminated and the owning ReplicaSet controller responds by creating a replacement pod to satisfy the declared replica count.
+The injection operates entirely through the Kubernetes control plane — no process-level or kernel-level manipulation is involved. This means the failure is clean and instantaneous, with no partial state or corrupted data left behind.
 
 ---
 
@@ -175,3 +181,14 @@ Upon automatic removal of the partition at T+60s, the failure rate dropped to 0.
 - **Absence of circuit breakers amplifies user impact.** Requests to the partitioned path were held open for the full 20-second timeout before failing, rather than fast-failing. A circuit breaker implementation would reduce this to milliseconds.
 - **Recovery was instantaneous.** Upon partition removal at T+60s, `failures/s` returned to 0.00 immediately with no retry storms or state corruption observed.
 - **Default probe timeouts (1s) caused unintended cluster-wide cascading failures in initial attempts.** Increasing timeouts to 10s was necessary to isolate the experiment to its intended scope.
+
+
+## Injection Mechanism
+
+Chaos Mesh implements network partition by injecting iptables rules directly into the network namespace of the targeted pod on the cluster node. When the experiment is applied, the Chaos Mesh daemon running on the node executes the equivalent of:
+```
+iptables -A OUTPUT -s <frontend-pod-IP> -d <checkoutservice-pod-IP> -j DROP
+iptables -A INPUT  -d <frontend-pod-IP> -s <checkoutservice-pod-IP> -j DROP
+```
+These rules cause the kernel to silently drop all IP packets travelling between the two pods in the specified direction. Neither pod is aware of the rule — from the application's perspective, packets are sent but never arrive, and no TCP connection is ever established. This results in connection timeouts rather than immediate connection refused errors, which is why response times reached the full 20-second HTTP timeout threshold rather than failing fast.
+When the experiment duration elapses, Chaos Mesh removes the injected iptables rules, restoring full network connectivity between the pods. Because the rules are stateless and operate at the packet level, recovery is instantaneous — no application restart or reconnection handshake is required.
