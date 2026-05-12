@@ -13,7 +13,9 @@ Prior to the experiment, all pods were ready and running.
 
 
 The frontend pod (`frontend-759775d795-qfd6l`) was operating within normal parameters. CPU usage stood at 0.047 cores (47% of requested, 23.5% of limit), with CPU throttling at 28.1%. The load generator recorded 937 requests with a 0% failure rate, an average response time of 82 ms.
+
 <img width="945" height="410" alt="image" src="https://github.com/user-attachments/assets/5ca2b401-8875-4ce2-807f-a060423facc3" />
+
 <img width="945" height="250" alt="image" src="https://github.com/user-attachments/assets/8effda90-a6e9-4d72-8396-de5fb0321ccc" />
 
 
