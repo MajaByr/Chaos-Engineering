@@ -192,3 +192,154 @@ iptables -A INPUT  -d <frontend-pod-IP> -s <checkoutservice-pod-IP> -j DROP
 ```
 These rules cause the kernel to silently drop all IP packets travelling between the two pods in the specified direction. Neither pod is aware of the rule — from the application's perspective, packets are sent but never arrive, and no TCP connection is ever established. This results in connection timeouts rather than immediate connection refused errors, which is why response times reached the full 20-second HTTP timeout threshold rather than failing fast.
 When the experiment duration elapses, Chaos Mesh removes the injected iptables rules, restoring full network connectivity between the pods. Because the rules are stateless and operate at the packet level, recovery is instantaneous — no application restart or reconnection handshake is required.
+
+## CPU Stress Mechanism
+
+### Theory
+
+Chaos Mesh implements CPU stress by injecting a stress workload directly into the target pod’s Linux cgroup and namespace using the embedded `stress-ng` utility. When the experiment is applied, the Chaos Mesh daemon running on the node launches CPU-intensive worker processes inside the selected container, equivalent to:
+
+```bash
+stress-ng --cpu 2 --cpu-load 90
+```
+
+*Note: If `stress-ng` is not available, install it with: `sudo apt-get install stress-ng`*
+
+This causes the injected worker threads to continuously execute computational operations in order to maintain approximately 90% utilization across the specified number of CPU cores. Because the stress process runs inside the same cgroup as the application container, it competes directly with the application for CPU scheduling time enforced by the Linux Completely Fair Scheduler (CFS).
+
+From the application’s perspective, no explicit failure occurs — the service remains reachable and functional, but receives significantly less CPU time for processing requests. As CPU saturation increases, request handling slows down, latency rises, and throughput decreases. Under sustained load, Kubernetes may additionally apply CPU throttling if container CPU limits are configured, further amplifying response delays.
+
+When the experiment duration elapses, Chaos Mesh terminates the injected stress processes, immediately releasing CPU resources back to the application container. Since no application state or network configuration is modified, recovery is near-instantaneous and does not require pod restarts or connection re-establishment.
+
+### Deployment
+
+1. Create a CPU stress experiment manifest (Chaos Mesh `yaml`):
+
+  ```yaml
+  apiVersion: chaos-mesh.org/v1alpha1
+  kind: StressChaos
+  metadata:
+    name: recommendation-cpu-stress
+    namespace: chaos-testing
+  spec:
+    mode: one
+    selector:
+      namespaces:
+        - boutique
+      labelSelectors:
+        app: recommendationservice
+    stressors:
+      cpu:
+        workers: 2
+        load: 90
+    duration: '120s'
+  ```
+
+2. Apply the experiment:
+
+  ```bash
+  kubectl apply -f recommendation-cpu-stress.yaml
+  ```
+
+3. Observe CPU utilization:
+
+  ```bash
+  kubectl top pod -n boutique
+  ```
+
+3. Generate traffic against the application:
+
+  ```bash
+  kubectl port-forward svc/frontend 8080:80 -n boutique
+  ```
+
+4. Continuously execute:
+
+```bash
+curl http://localhost:8080
+```
+
+*. Useful Grafana metrics to observe:
+* CPU saturation
+* container CPU throttling
+* request throughput
+* latency increase
+* service response times
+
+5. Remove the experiment:
+
+  ```bash
+  kubectl delete -f recommendation-cpu-stress.yaml
+  ```
+
+## Memory Stress Mechanism
+
+### Theory
+
+Chaos Mesh implements memory stress by injecting artificial memory pressure into the target pod using `stress-ng` memory allocation workers executed inside the container namespace. When the experiment is applied, the Chaos Mesh daemon launches processes equivalent to:
+
+```bash
+stress-ng --vm 1 --vm-bytes 512M
+```
+
+These worker processes continuously allocate and access large regions of memory, forcing the container to consume a significant portion of its available RAM. Because the stress workload executes within the same Kubernetes cgroup as the application, the memory usage is accounted against the pod’s configured memory limits.
+
+From the application’s perspective, the service initially continues to operate normally, but available memory gradually decreases. As memory pressure increases, the Linux kernel may reclaim page cache, trigger swap activity (if enabled), or invoke the Out-Of-Memory (OOM) killer once the container exceeds its memory limit. In Kubernetes, this typically results in container termination and automatic pod restart according to the deployment policy.
+
+Unlike network-based chaos experiments, memory stress can therefore lead to hard application failures rather than degraded performance alone. During the experiment, Grafana metrics typically show rapidly increasing memory utilization, potential OOM kill events, elevated restart counts, and temporary spikes in request errors while the affected pod is recreated.
+
+### Deployment
+
+1. Create a memory stress experiment manifest (Chaos Mesh `yaml`):
+
+  ```yaml
+  apiVersion: chaos-mesh.org/v1alpha1
+kind: StressChaos
+metadata:
+  name: cart-memory-stress
+  namespace: chaos-testing
+spec:
+  mode: one
+  selector:
+    namespaces:
+      - boutique
+    labelSelectors:
+      app: cartservice
+  stressors:
+    memory:
+      workers: 1
+      size: '512MB'
+  duration: '120s'
+  ```
+
+2. Apply the experiment:
+   ```bash
+   kubectl apply -f cart-memory-stress.yaml
+   ```
+
+3. Observe pod resource usage:
+   ```bash
+    kubectl top pod -n boutique
+   ```
+
+4. Watch for OOM restarts:
+   ```bash
+   kubectl get pods -n boutique -w
+   ```
+
+5. Inspect pod termination reason:
+  ```bash
+  kubectl describe pod <cartservice-pod-name> -n boutique
+  ```
+
+  *. Useful Grafana metrics to observe:
+  * memory utilization
+  * OOM kill events
+  * pod restart count
+  * request error rate
+  * service instability
+
+6. Remove the experiment:
+   ```bash
+   kubectl delete -f cart-memory-stress.yaml
+   ```
