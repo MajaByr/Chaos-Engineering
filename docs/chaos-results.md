@@ -1,4 +1,4 @@
-<img width="1114" height="305" alt="image" src="https://github.com/user-attachments/assets/08172119-e88b-4075-a28e-25e00c055875" /># Experiment 1: Pod Failure (Pod Kill)
+# Experiment 1: Pod Failure (Pod Kill)
 
 **Objective:** Simulate an unexpected frontend pod crash and observe Kubernetes self-healing behavior, measuring the impact on request error rate and system recovery time.
 
