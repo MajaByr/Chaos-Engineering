@@ -1,10 +1,15 @@
 # Experiment 1: Pod Failure (Pod Kill)
 
-**Objective:** Simulate an unexpected frontend pod crash and observe Kubernetes self-healing behavior, measuring the impact on request error rate and system recovery time.
+## Objective 
+Simulate an unexpected frontend pod crash and observe Kubernetes self-healing behavior, measuring the impact on request error rate and system recovery time.
 
-**Target service:** `frontend` (namespace: `default`)
+## Theory 
+Chaos Mesh implements a pod kill by issuing a direct deletion request to the Kubernetes API server, targeting the selected pod. The controller identifies the pod matching the label selector and calls the exact same API endpoint that executing kubectl delete pod would invoke.
 
-**Tool:** Chaos Mesh — `PodChaos` action `pod-kill`, mode `one`
+Upon receiving this request, the container runtime (e.g., containerd) receives a SIGTERM signal and immediately stops the container. Because Kubernetes constantly monitors the state of the cluster, it quickly detects the pod as terminated. The owning ReplicaSet controller immediately responds to this state change by creating a replacement pod to satisfy the declared replica count.
+
+The injection operates entirely through the standard Kubernetes control plane—no direct process-level or kernel-level manipulation is involved. This ensures that the failure is clean and instantaneous, with no partial state or corrupted data left behind. The primary goal of this experiment is to observe how quickly the system's self-healing mechanisms restore the required number of replicas (Mean Time To Recovery) and how the brief unavailability impacts user traffic.
+
 
 ## Baseline (pre-experiment)
 
@@ -21,6 +26,7 @@ The frontend pod (`frontend-759775d795-qfd6l`) was operating within normal param
 
 ## Experiment Execution
 
+1. **Creating the manifest**
 The pod kill was injected via Chaos Mesh. The injection was specified by the following `.yaml` file:
 
 ```yaml
@@ -39,6 +45,15 @@ spec:
       "app": "frontend"
 ```
 
+2. **Applying the experiment:**
+```bash
+kubectl apply -f network-partition.yaml
+```
+
+3. **Observing the system:**
+```bash
+kubectl get pods -n default --sort-by='.lastTimestamp' | Select-String "frontend"
+```
 The following sequence was observed:
 <img width="945" height="99" alt="image" src="https://github.com/user-attachments/assets/fb37be10-47c2-4430-9f9c-b9773d812443" />
 
@@ -59,6 +74,10 @@ In Grafana we can see that new pod was created almost immediately:
 
 
 ## Load Generator Comparison
+
+```bash
+kubectl logs -n default deployment/loadgenerator --tail=20
+```
 
 | Metrics | Before | After | Change |
 |---|---|---|---|
@@ -83,12 +102,6 @@ Importantly, the failures were limited to the disruption window only.
 - The elevated average response time (128 ms vs 82 ms baseline) reflects request failures and retries during the disruption window rather than ongoing latency degradation.
 - The absence of image pull delay (cached image) was a key factor in achieving sub-10-second MTTR. In a cold-start scenario (no cached image), MTTR would take much longer.
 
-
-## Injection mechanism 
-
-Chaos Mesh implements pod kill by issuing a direct deletion request to the Kubernetes API server targeting the selected pod. The controller identifies the pod matching the label selector and calls the same API endpoint that kubectl delete pod would invoke. The container runtime (containerd) receives a SIGTERM signal and immediately stops the container. Kubernetes detects the pod as terminated and the owning ReplicaSet controller responds by creating a replacement pod to satisfy the declared replica count.
-The injection operates entirely through the Kubernetes control plane — no process-level or kernel-level manipulation is involved. This means the failure is clean and instantaneous, with no partial state or corrupted data left behind.
-
 ---
 
 
@@ -96,9 +109,17 @@ The injection operates entirely through the Kubernetes control plane — no proc
 
 # Experiment 2: Network Partition
 
-**Objective:** Simulate a network-level communication failure between the frontend and checkoutservice, and observe the system's partial degradation behavior and recovery.
+## Objective
+Simulate a network-level communication failure between the frontend and checkoutservice, and observe the system's partial degradation behavior and recovery.
 
-**Tool:** Chaos Mesh — `NetworkChaos`, action `partition`, direction `to`, duration `60s`
+## Theory
+Chaos Mesh implements network partitions by injecting iptables rules directly into the network namespace of the targeted pod on the cluster node. When the experiment is applied, the Chaos Mesh daemon running on the node executes the equivalent of network dropping rules (e.g., iptables -A OUTPUT ... -j DROP).
+
+These rules cause the Linux kernel to silently drop all IP packets traveling between the two specified pods in the targeted direction. Neither pod is aware of the rule. From the application's perspective, packets are sent but never arrive, and no TCP connection is successfully established.
+
+Because the packets are silently dropped rather than explicitly rejected, this results in connection timeouts rather than immediate "connection refused" errors. Application requests will hang open until they hit their maximum HTTP timeout threshold before finally failing. This perfectly simulates real-world degraded network hardware or misconfigured routing.
+
+When the experiment duration elapses, Chaos Mesh removes the injected iptables rules, restoring full network connectivity. Because the rules are stateless and operate at the packet level, recovery is instantaneous—no application restart or reconnection handshake is required.
 
 ## Baseline (pre-experiment)
 
@@ -110,7 +131,7 @@ Prior to conducting network partition experiments, liveness and readiness probe 
 
 
 ## Experiment Execution
-
+1. **Creating the manifest**
 The network partition was injected via Chaos Mesh. The injection was specified by the following `.yaml` file:
 
 ```yaml
@@ -138,6 +159,17 @@ spec:
         app: checkoutservice
 ```
 
+2. **Applaying the manifest**
+
+```bash
+kubectl apply -f partition-frontend-checkout.yaml
+```
+Watch Cluster Events in Real-Time: 
+
+```bash
+kubectl get events -n default --sort-by='.lastTimestamp' -w
+```
+
 | Time | Event |
 |---|---|
 | T+0s | Experiment started |
@@ -147,7 +179,10 @@ spec:
 
 <img width="1090" height="255" alt="image" src="https://github.com/user-attachments/assets/80e72532-9d07-4e29-8a87-9f40124c5285" />
 
-## Impact Observed During Partition
+3. **Observing the system:**
+```bash
+kubectl logs -n boutique deployment/loadgenerator --tail=20 -f
+```
 
 The network partition produced a clean, isolated failure confined exclusively to the `POST /cart/checkout` endpoint. All other 13 endpoints maintained a 0% failure rate throughout the experiment, confirming the expected partial degradation behavior.
 
@@ -166,6 +201,9 @@ The network partition produced a clean, isolated failure confined exclusively to
 The maximum observed response time of 20,046ms corresponds to the frontend's HTTP timeout threshold — requests to checkoutservice were held open until the connection timed out, rather than failing immediately.
 
 No pod restarts occurred during the experiment:
+```bash
+kubectl get pods
+```
 <img width="872" height="403" alt="image" src="https://github.com/user-attachments/assets/0754fd51-1258-4ca9-af9d-b9d29439e29b" />
 
 
