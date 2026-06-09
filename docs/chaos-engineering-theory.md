@@ -1,9 +1,4 @@
-# Chaos Engineering: Resilience Testing with Chaos Mesh
-
-
-This repository contains a comprehensive lab environment for evaluating system resilience under controlled failures, observing failure propagation across microservices, and validating Kubernetes self-healing mechanisms using Chaos Mesh.
-
----
+# Chaos Engineering
 
 ## 1. The Inevitability of Failure
 In 2008, long before it was the global streaming giant we know today, Netflix experienced a catastrophic database corruption in its on-premises data center. The result was a massive three-day service outage. Similarly, we have witnessed major cloud providers like AWS experience region-wide outages (such as the infamous US-East-1 disruptions) and major financial institutions suffer hours of downtime due to minor configuration changes.

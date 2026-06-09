@@ -1,17 +1,18 @@
-# Experiment 1: Pod Failure (Pod Kill)
+# Results
 
-## Objective 
+## Experiment 1: Pod Failure (Pod Kill)
+
+### Objective 
 Simulate an unexpected frontend pod crash and observe Kubernetes self-healing behavior, measuring the impact on request error rate and system recovery time.
 
-## Theory 
+### Theory 
 Chaos Mesh implements a pod kill by issuing a direct deletion request to the Kubernetes API server, targeting the selected pod. The controller identifies the pod matching the label selector and calls the exact same API endpoint that executing kubectl delete pod would invoke.
 
 Upon receiving this request, the container runtime (e.g., containerd) receives a SIGTERM signal and immediately stops the container. Because Kubernetes constantly monitors the state of the cluster, it quickly detects the pod as terminated. The owning ReplicaSet controller immediately responds to this state change by creating a replacement pod to satisfy the declared replica count.
 
 The injection operates entirely through the standard Kubernetes control plane—no direct process-level or kernel-level manipulation is involved. This ensures that the failure is clean and instantaneous, with no partial state or corrupted data left behind. The primary goal of this experiment is to observe how quickly the system's self-healing mechanisms restore the required number of replicas (Mean Time To Recovery) and how the brief unavailability impacts user traffic.
 
-
-## Baseline (pre-experiment)
+### Baseline (pre-experiment)
 
 Prior to the experiment, all pods were ready and running.
 <img width="890" height="359" alt="image" src="screenshots/1.png" />
@@ -24,7 +25,7 @@ The frontend pod (`frontend-759775d795-qfd6l`) was operating within normal param
 <img width="945" height="250" alt="image" src="screenshots/3.png" />
 
 
-## Experiment Execution
+### Experiment Execution
 
 1. **Creating the manifest**
 The pod kill was injected via Chaos Mesh. The injection was specified by the following `.yaml` file:
@@ -73,7 +74,7 @@ In Grafana we can see that new pod was created almost immediately:
 <img width="865" height="500" alt="image" src="screenshots/5.png" />
 
 
-## Load Generator Comparison
+### Load Generator Comparison
 
 ```bash
 kubectl logs -n default deployment/loadgenerator --tail=20
@@ -89,30 +90,25 @@ kubectl logs -n default deployment/loadgenerator --tail=20
 <img width="945" height="254" alt="image" src="screenshots/6.png" />
 
 
-## Error Rate and Latency — Impact Observed
+### Error Rate and Latency — Impact Observed
 
 After the experiment, the load generator recorded a cumulative failure rate of 0.64% (21 out of 3275 requests), compared to 0% before the experiment. Average response time increased from 82 ms to 128 ms (+56%), reflecting the brief period during which the frontend was unavailable. Max response time reached 19685 ms (+322%) after running the experiment.
 
 Importantly, the failures were limited to the disruption window only.
 
-## Conclusions
+### Conclusions
 
 - Kubernetes self-healing operated automatically and without manual intervention, restarting the frontend pod within 6 seconds.
 - The brief unavailability window caused a measurable but contained error spike (0.64% of total requests), with no persistent degradation after recovery.
 - The elevated average response time (128 ms vs 82 ms baseline) reflects request failures and retries during the disruption window rather than ongoing latency degradation.
 - The absence of image pull delay (cached image) was a key factor in achieving sub-10-second MTTR. In a cold-start scenario (no cached image), MTTR would take much longer.
 
----
+## Experiment 2: Network Partition
 
-
-
-
-# Experiment 2: Network Partition
-
-## Objective
+### Objective
 Simulate a network-level communication failure between the frontend and checkoutservice, and observe the system's partial degradation behavior and recovery.
 
-## Theory
+### Theory
 Chaos Mesh implements network partitions by injecting iptables rules directly into the network namespace of the targeted pod on the cluster node. When the experiment is applied, the Chaos Mesh daemon running on the node executes the equivalent of network dropping rules (e.g., iptables -A OUTPUT ... -j DROP).
 
 These rules cause the Linux kernel to silently drop all IP packets traveling between the two specified pods in the targeted direction. Neither pod is aware of the rule. From the application's perspective, packets are sent but never arrive, and no TCP connection is successfully established.
@@ -121,7 +117,7 @@ Because the packets are silently dropped rather than explicitly rejected, this r
 
 When the experiment duration elapses, Chaos Mesh removes the injected iptables rules, restoring full network connectivity. Because the rules are stateless and operate at the packet level, recovery is instantaneous—no application restart or reconnection handshake is required.
 
-## Baseline (pre-experiment)
+### Baseline (pre-experiment)
 
 Prior to the experiment, all 14 monitored endpoints reported a 0% failure rate. The checkout endpoint (`POST /cart/checkout`) recorded an average response time of 139ms with no failures across 119 requests. Overall system throughput was stable at 1.80 req/s.
 
@@ -130,7 +126,7 @@ Prior to conducting network partition experiments, liveness and readiness probe 
 <img width="1123" height="310" alt="image" src="screenshots/7.png" />
 
 
-## Experiment Execution
+### Experiment Execution
 1. **Creating the manifest**
 The network partition was injected via Chaos Mesh. The injection was specified by the following `.yaml` file:
 
@@ -207,12 +203,12 @@ kubectl get pods
 <img width="872" height="403" alt="image" src="screenshots/10.png" />
 
 
-## Recovery
+### Recovery
 
 Upon automatic removal of the partition at T+60s, the failure rate dropped to 0.00 failures/s immediately. The 8 failures recorded during the experiment represent the total blast radius — no additional failures were observed post-recovery.
 <img width="1114" height="305" alt="image" src="screenshots/11.png" />
 
-## Conclusions
+### Conclusions
 
 - **Partial degradation confirmed.** The partition isolated failures exclusively to `POST /cart/checkout` (2.45% failure rate) while all 13 remaining endpoints maintained 0% failure rate, demonstrating effective blast radius containment.
 - **Kubernetes self-healing does not apply to network failures.** Zero pod restarts occurred. Unlike crashed pods, a running-but-unreachable service is invisible to Kubernetes lifecycle mechanisms.
@@ -221,7 +217,7 @@ Upon automatic removal of the partition at T+60s, the failure rate dropped to 0.
 - **Default probe timeouts (1s) caused unintended cluster-wide cascading failures in initial attempts.** Increasing timeouts to 10s was necessary to isolate the experiment to its intended scope.
 
 
-## Injection Mechanism
+### Injection Mechanism
 
 Chaos Mesh implements network partition by injecting iptables rules directly into the network namespace of the targeted pod on the cluster node. When the experiment is applied, the Chaos Mesh daemon running on the node executes the equivalent of:
 ```
@@ -231,7 +227,7 @@ iptables -A INPUT  -d <frontend-pod-IP> -s <checkoutservice-pod-IP> -j DROP
 These rules cause the kernel to silently drop all IP packets travelling between the two pods in the specified direction. Neither pod is aware of the rule — from the application's perspective, packets are sent but never arrive, and no TCP connection is ever established. This results in connection timeouts rather than immediate connection refused errors, which is why response times reached the full 20-second HTTP timeout threshold rather than failing fast.
 When the experiment duration elapses, Chaos Mesh removes the injected iptables rules, restoring full network connectivity between the pods. Because the rules are stateless and operate at the packet level, recovery is instantaneous — no application restart or reconnection handshake is required.
 
-## CPU Stress Mechanism
+## Experiment 3: CPU Stress
 
 ### Theory
 
@@ -241,11 +237,11 @@ Chaos Mesh implements CPU stress by injecting a stress workload directly into th
 stress-ng --cpu 2 --cpu-load 90
 ```
 
-*Note: If `stress-ng` is not available, install it with: `sudo apt-get install stress-ng`*
+*Note: If `stress-ng` is not available, it can be installed with: `sudo apt-get install stress-ng`*
 
 This causes the injected worker threads to continuously execute computational operations in order to maintain approximately 90% utilization across the specified number of CPU cores. Because the stress process runs inside the same cgroup as the application container, it competes directly with the application for CPU scheduling time enforced by the Linux Completely Fair Scheduler (CFS).
 
-From the application’s perspective, no explicit failure occurs — the service remains reachable and functional, but receives significantly less CPU time for processing requests. As CPU saturation increases, request handling slows down, latency rises, and throughput decreases. Under sustained load, Kubernetes may additionally apply CPU throttling if container CPU limits are configured, further amplifying response delays.
+From the application's perspective, no explicit failure occurs — the service remains reachable and functional, but receives significantly less CPU time for processing requests. As CPU saturation increases, request handling slows down, latency rises, and throughput decreases. Under sustained load, Kubernetes may additionally apply CPU throttling if container CPU limits are configured, further amplifying response delays.
 
 When the experiment duration elapses, Chaos Mesh terminates the injected stress processes, immediately releasing CPU resources back to the application container. Since no application state or network configuration is modified, recovery is near-instantaneous and does not require pod restarts or connection re-establishment.
 
@@ -285,32 +281,30 @@ When the experiment duration elapses, Chaos Mesh terminates the injected stress 
   kubectl top pod -n boutique
   ```
 
-3. Generate traffic against the application:
+  CPU usage before:
+  <img alt="image" src="screenshots/cpu-stress/cpu-stress-disabled.png" />
 
-  ```bash
-  kubectl port-forward svc/frontend 8080:80 -n boutique
-  ```
+  CPU usage after:
+  <img alt="image" src="screenshots/cpu-stress/cpu-stress-active.png" />
 
-4. Continuously execute:
+  <img alt="image" src="screenshots/cpu-stress/cpu-grafana.png" />
 
-```bash
-curl http://localhost:8080
-```
+Application worked slower, but no failures were observed.
 
-*. Useful Grafana metrics to observe:
+Useful Grafana metrics to observe:
 * CPU saturation
 * container CPU throttling
 * request throughput
 * latency increase
 * service response times
 
-5. Remove the experiment:
+4. Remove the experiment:
 
   ```bash
   kubectl delete -f recommendation-cpu-stress.yaml
   ```
 
-## Memory Stress Mechanism
+## Experiment 4: Memory Stress
 
 ### Theory
 
@@ -351,26 +345,37 @@ spec:
   ```
 
 2. Apply the experiment:
+  
    ```bash
    kubectl apply -f cart-memory-stress.yaml
    ```
 
 3. Observe pod resource usage:
+  
    ```bash
     kubectl top pod -n boutique
    ```
 
 4. Watch for OOM restarts:
+  
    ```bash
    kubectl get pods -n boutique -w
    ```
 
+  <img alt="image" src="screenshots/memory-stress/logs.png" />
+
+  <img alt="image" src="screenshots/memory-stress/pods-oom.png" />
+
 5. Inspect pod termination reason:
+  
   ```bash
   kubectl describe pod <cartservice-pod-name> -n boutique
   ```
 
-  *. Useful Grafana metrics to observe:
+  <img alt="image" src="screenshots/memory-stress/cart-oom-logs.png" />
+
+Useful Grafana metrics to observe:
+
   * memory utilization
   * OOM kill events
   * pod restart count

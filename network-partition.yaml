@@ -1,0 +1,22 @@
+apiVersion: chaos-mesh.org/v1alpha1
+kind: NetworkChaos
+metadata:
+  name: partition-frontend-checkout
+  namespace: default
+spec:
+  action: partition
+  mode: all
+  duration: "60s"
+  selector:
+    namespaces:
+      - default
+    labelSelectors:
+      app: frontend
+  direction: to
+  target:
+    mode: all
+    selector:
+      namespaces:
+        - default
+      labelSelectors:
+        app: checkoutservice
