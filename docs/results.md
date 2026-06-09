@@ -298,13 +298,13 @@ Useful Grafana metrics to observe:
 * latency increase
 * service response times
 
-1. Remove the experiment:
+4. Remove the experiment:
 
   ```bash
   kubectl delete -f recommendation-cpu-stress.yaml
   ```
 
-## Experiment 4: Memory Stress Mechanism
+## Experiment 4: Memory Stress
 
 ### Theory
 
@@ -382,7 +382,7 @@ Useful Grafana metrics to observe:
   * request error rate
   * service instability
 
-1. Remove the experiment:
+6. Remove the experiment:
    ```bash
    kubectl delete -f cart-memory-stress.yaml
    ```
