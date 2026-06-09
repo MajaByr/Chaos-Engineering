@@ -225,29 +225,8 @@ kubectl apply -f pod-kill.yaml
 kubectl delete -f pod-kill.yaml
 ```
 
-### Experiment 2: Network Partition
 
-**Objective:** Simulate a network-level communication failure between the `frontend` and the `checkoutservice`. Observe how the system degrades partially rather than failing entirely.
-
-**1. Execute the Experiment**
-
-```bash
-kubectl apply -f network-partition.yaml
-```
-
-**2. Observe the System**
-
-* Note that no pods are killed during this experiment. 
-* Check the Load Generator logs. You should see HTTP timeout errors specifically for the `/cart/checkout` endpoint.
-* Open Grafana. Observe the response times for the checkout service. Without a circuit breaker, requests will hang until they hit the application's maximum timeout threshold.
-
-**3. Cleanup**
-*Wait 60 seconds for the experiment to automatically finish, or run:*
-```bash
-kubectl delete -f network-partition.yaml
-```
-
-### Experiment 3: CPU Stress
+### Experiment 2: CPU Stress
 
 **Objective:** Induce a CPU bottleneck in the `recommendationservice` to observe how resource starvation affects request throughput and latency.
 
@@ -272,7 +251,7 @@ kubectl apply -f cpu-stress.yaml
 kubectl delete -f cpu-stress.yaml
 ```
 
-### Experiment 4: Memory Stress
+### Experiment 3: Memory Stress
 
 **Objective:** Simulate severe memory pressure within the `cartservice` container to trigger an Out-Of-Memory (OOM) kill by the Linux kernel.
 
